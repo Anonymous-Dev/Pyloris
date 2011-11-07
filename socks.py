@@ -43,6 +43,7 @@ mainly to merge bug fixes found in Sourceforge
 import socket
 import struct
 import sys
+import time
 
 PROXY_TYPE_SOCKS4 = 1
 PROXY_TYPE_SOCKS5 = 2
@@ -328,6 +329,7 @@ class socksocket(socket.socket):
         resp = self.recv(1)
         while resp.find("\r\n\r\n".encode()) == -1:
             resp = resp + self.recv(1)
+            time.sleep(0.001)
         # We just need the first line to check if the connection
         # was successful
         statusline = resp.splitlines()[0].split(" ".encode(), 2)
